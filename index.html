@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Sweat Hell — Robotic v3 (Lasers & Saws, Faster)</title>
+<title>Bullet Hell — Robotic v3+ (Bombs)</title>
 <style>
   :root{
     --bg:#05060a; --panel:#0b0d10; --muted:#98a2ad; --steel:#9aa6b2; --accent:#4fe0ff;
@@ -36,13 +36,13 @@
     <div class="chip" id="multChip">Lives: 3</div>
   </div>
 
-  <div id="scoreBig">SWEAT HELL • Score: <span id="scoreVal">0</span></div>
+  <div id="scoreBig">BULLET HELL • Score: <span id="scoreVal">0</span></div>
 
   <!-- Menu -->
   <div id="menu" class="center">
     <div class="panel">
-      <h1>Sweat Hell — Robotic v3</h1>
-      <p class="muted">Added lasers & moving saws. Faster movement. 3 lives. Telegraphed lasers and balanced saw placement for fairness.</p>
+      <h1>BULLET HELL</h1>
+      <p class="muted">Robotic grey style. Faster movement. Slower score. You have 3 lives. New bombs, saws, lasers and heavy bullet patterns. Telegraphed explosions so you can dodge.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:12px">
         <button id="startBtn" class="btn">Start (Space)</button>
         <button id="tutorialBtn" class="btn">How to Play</button>
@@ -66,7 +66,7 @@
   <div id="tutorial" class="center" style="display:none;pointer-events:auto">
     <div class="panel">
       <h1>How to Play</h1>
-      <p class="muted">Move with arrow keys or WASD. Avoid bullets, moving saws and telegraphed lasers. You have 3 lives; each hit costs a life and grants brief invulnerability.</p>
+      <p class="muted">Move with arrow keys or WASD. Avoid bullets, moving saws, telegraphed lasers and bombs. Bombs appear with a blinking warning and explode with a radius you must dodge. You have 3 lives — each hit costs a life and grants brief invulnerability.</p>
       <div class="row"><button id="tBack" class="btn">Back</button></div>
     </div>
   </div>
@@ -102,14 +102,12 @@
 
 <script>
 /*
-Sweat Hell v3
-- Adds lasers (telegraphed) and moving saw obstacles.
-- Faster player (more responsive, higher top speed).
-- Keeps 3 lives + invulnerability after hit.
-- Local top-5 leaderboard persists.
+Bullet Hell (v3+) — bombs added, player slightly faster, renamed UI.
+- Bombs: telegraphed warning blink then explode (AoE). Dodge the blast!
+- Keep lasers, saws, bullets, 3 lives, invulnerability, leaderboard.
 */
 
-//// Canvas & basic utilities
+// Canvas & utils
 const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
 let W = canvas.width = innerWidth, H = canvas.height = innerHeight;
 window.addEventListener('resize', ()=> { W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
@@ -120,7 +118,10 @@ function dist(x1,y1,x2,y2){ const dx=x1-x2, dy=y1-y2; return Math.sqrt(dx*dx+dy*
 function circleRectColl(cx,cy,r,rx,ry,rw,rh){ const nx = Math.max(rx, Math.min(cx, rx+rw)); const ny = Math.max(ry, Math.min(cy, ry+rh)); const dx = cx - nx, dy = cy - ny; return dx*dx + dy*dy <= r*r; }
 function rectIntersect(ax,ay,aw,ah,bx,by,bw,bh){ return !(ax + aw < bx || ax > bx + bw || ay + ah < by || ay > by + bh); }
 
-//// DOM refs
+// DOM refs & leaderboard keys
+const LB_KEY = 'bullethell_lb_v1';
+const SAVE_KEY = 'bullethell_save_v1';
+
 const menu = document.getElementById('menu'), tutorial = document.getElementById('tutorial'), pausePanel = document.getElementById('pause'), gameOverPanel = document.getElementById('gameOver');
 const startBtn = document.getElementById('startBtn'), tutorialBtn = document.getElementById('tutorialBtn'), tBack = document.getElementById('tBack');
 const resumeBtn = document.getElementById('resumeBtn'), rBtn = document.getElementById('rBtn');
@@ -139,7 +140,7 @@ rBtn.onclick = restart;
 tryBtn.onclick = ()=>{ restart(); gameOverPanel.style.display='none'; }
 menuBtn.onclick = ()=>{ gameOverPanel.style.display='none'; menu.style.display='flex'; }
 saveBtn.onclick = ()=>{ const name = playerNameInput.value.trim() || '---'; const list = addToLeaderboard(name, score); gameOverLB.innerHTML = formatLeaderboard(list); updateMenuLB(); saveBtn.disabled = true; }
-resetSaveBtn.onclick = ()=>{ if (confirm('Clear leaderboard & high score?')) { localStorage.removeItem('sweat_lb_v3'); localStorage.removeItem('sweat_save_v3'); loadSave(); updateMenuLB(); alert('Cleared'); } }
+resetSaveBtn.onclick = ()=>{ if (confirm('Clear leaderboard & high score?')) { localStorage.removeItem(LB_KEY); localStorage.removeItem(SAVE_KEY); loadSave(); updateMenuLB(); alert('Cleared'); } }
 
 document.addEventListener('keydown', (e)=> {
   if ((e.key === ' ' || e.code === 'Space') && !running) startGame();
@@ -147,9 +148,7 @@ document.addEventListener('keydown', (e)=> {
   if (e.key === 'r') restart();
 });
 
-//// Leaderboard persistence
-const LB_KEY = 'sweat_lb_v3';
-const SAVE_KEY = 'sweat_save_v3';
+// leaderboard persistence
 function loadLB(){ try{const s=localStorage.getItem(LB_KEY); return s?JSON.parse(s):[];}catch{return [];} }
 function saveLB(list){ localStorage.setItem(LB_KEY, JSON.stringify(list)); }
 function addToLeaderboard(name, scr){
@@ -173,30 +172,35 @@ let saveState = loadSave();
 function updateMenuLB(){ leaderboardEl.innerHTML = formatLeaderboard(loadLB()); highScoreEl.textContent = Math.round(saveState.high || 0); }
 updateMenuLB();
 
-//// Game state
+// game state
 let running=false, paused=false, last = performance.now();
 let score = 0, timeAlive = 0, difficulty = 1.0;
 let lives = 3;
 let invulTimer = 0; // ms invulnerability after hit
-let player = { x: W/2, y: H*0.75, w: 18, h: 22, vx:0, vy:0, accel:0.42, friction:0.82, vmax:14.0 }; // FASTER: accel & vmax increased
+// player: slightly faster than v3 (just a bit faster)
+let player = { x: W/2, y: H*0.75, w: 18, h: 22, vx:0, vy:0, accel:0.46, friction:0.80, vmax:15.6 }; // small bump
 let keys = {};
-let bullets = [], lasers = [], saws = [], spawners = [], particles = [];
+let bullets = [], lasers = [], saws = [], bombs = [], spawners = [], particles = [];
 
-//// Tuning
-const TUNE = {
-  spawnIntervalBase: 1200,
-  spawnRandomChance: 0.0022,
-  difficultyRamp: 0.00005,
-  scorePerMs: 0.0025, // slower score growth
-  sawSpawnChanceWhenSpawner: 0.16, // chance a spawner will create a saw instead of bullets (balanced)
-  sawDensityLimit: 4 // max saws on screen at once
-};
-
-//// Input movement
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
-//// Spawn helper functions
+// tuning
+const TUNE = {
+  spawnIntervalBase: 1200,
+  spawnRandomChance: 0.0022,
+  difficultyRamp: 0.000045,
+  scorePerMs: 0.0022,
+  sawSpawnChanceWhenSpawner: 0.14,
+  sawDensityLimit: 4,
+  bombSpawnChanceWhenSpawner: 0.08, // chance to spawn bomb instead of saw/bullets
+  bombWarn: 900, // ms warning before explosion
+  bombFuseMin: 1200, // minimum ms between warn start and explosion if using different timing
+  bombRadiusMin: 60,
+  bombRadiusMax: 110
+};
+
+// spawn helpers
 function spawnBullet(x,y,vx,vy,r=6,color='#9aa6b2', kind='normal', life=9000){
   bullets.push({ x,y,vx,vy,r,color,kind,life });
 }
@@ -208,18 +212,21 @@ function spawnLaser(x,y,w,h,warn=700,fire=450){
   lasers.push({ x,y,w,h,warn,fire,phase:'warn',timer:0, color:'#4fe0ff' });
 }
 function spawnSaw(x,y,range=80,speed=1.2,size=36){
-  // limit saw density to avoid impossible screens
   if (saws.length >= TUNE.sawDensityLimit) return;
   saws.push({ x0:x, y:y, range:range, speed:speed, dir: (Math.random()<0.5?1:-1), off:0, size:size });
 }
-function spawnParticles(x,y,color,count=8){
-  for (let i=0;i<count;i++) particles.push({ x, y, vx:rand(-2.2,2.2), vy:rand(-3.2,-0.6), life:300 + Math.random()*260, size:2 + Math.random()*3, color});
+function spawnBomb(x,y, warn = TUNE.bombWarn, fuse = TUNE.bombFuseMin, radius = null){
+  // bomb appears at (x,y) and blinks for warn ms then explodes with radius
+  bombs.push({ x:x, y:y, vy:0, warnTimer: warn, fuse: fuse, timer:0, state:'warn', radius: radius || rand(TUNE.bombRadiusMin, TUNE.bombRadiusMax), exploded:false, flashPhase:0 });
+}
+function spawnParticles(x,y,color,count=10){
+  for (let i=0;i<count;i++) particles.push({ x, y, vx:rand(-2.2,2.2), vy:rand(-3.2,-0.6), life:300 + Math.random()*240, size:2 + Math.random()*3, color});
 }
 function addSpawner(type,x,y,opts){
   spawners.push({ type, x, y, opts: opts||{}, timer:0, interval: TUNE.spawnIntervalBase + rand(0,700) });
 }
 
-//// Spawner behavior (sometimes create saws)
+// spawners: sometimes spawn bombs
 function updateSpawners(dt){
   for (let i=spawners.length-1;i>=0;i--){
     const s = spawners[i];
@@ -227,19 +234,23 @@ function updateSpawners(dt){
     const effInterval = Math.max(240, s.interval * (1 - (difficulty-1)*0.06));
     if (s.timer >= effInterval){
       s.timer = 0;
-      // occasionally spawn a saw instead of a bullet pattern
-      if (Math.random() < TUNE.sawSpawnChanceWhenSpawner){
-        // place saw on a guessed "platform" area (upper half) to give room to dodge
+      // bomb branch
+      if (Math.random() < TUNE.bombSpawnChanceWhenSpawner){
+        // spawn bomb somewhere in upper half, telegraphed
+        const bx = clamp(s.x + rand(-60,60), 60, W - 60);
+        const by = rand(60, H*0.35);
+        spawnBomb(bx, by, TUNE.bombWarn, TUNE.bombFuseMin + rand(0,400), rand(TUNE.bombRadiusMin, TUNE.bombRadiusMax));
+      } else if (Math.random() < TUNE.sawSpawnChanceWhenSpawner) {
         const sy = Math.max(120, Math.min(H-160, s.y + rand(-30, 40)));
         spawnSaw(s.x + rand(-60,60), sy, 50 + Math.random()*90, 0.9 + Math.random()*0.8, 32 + Math.random()*8);
       } else {
-        // bullet patterns similar to previous builds but slightly tamer
+        // bullet patterns
         if (s.type === 'spiral'){
           const count = Math.min(30, 10 + Math.floor(difficulty*4));
           let base = s.opts.angle || 0;
           for (let k=0;k<count;k++){
             const a = base + (k * (Math.PI*2 / count)) + rand(-0.03, 0.03);
-            const speed = 1.0 + difficulty*0.26 + Math.random()*0.4;
+            const speed = 1.0 + difficulty*0.26 + Math.random()*0.45;
             spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 4 + Math.random()*2, '#9aa6b2','normal',7000);
           }
           s.opts.angle = base + ((Math.random()<0.5?1:-1) * 0.14);
@@ -267,7 +278,7 @@ function updateSpawners(dt){
             spawnBullet(sx, s.y, 0, 1.6 + difficulty*0.2, 6, '#b7bcc0','normal',7000);
           }
         }
-        // small chance to spawn a vertical laser at some spawns (telegraphed)
+        // small chance to spawn a vertical laser
         if (Math.random() < clamp(0.04 + difficulty*0.008, 0, 0.12)) {
           const lx = rand(80, W-80);
           spawnLaser(lx - 6, 40, 12, H-80, 700, 450);
@@ -287,7 +298,7 @@ function updateSpawners(dt){
   }
 }
 
-//// Update bullets, lasers, saws, particles
+// bullets/lasers/saws/bombs update
 function updateBullets(dt){
   for (let i=bullets.length-1;i>=0;i--){
     const b = bullets[i];
@@ -303,7 +314,6 @@ function updateBullets(dt){
     b.life -= dt;
     if (b.life <= 0 || b.x < -60 || b.x > W+60 || b.y < -120 || b.y > H+120) bullets.splice(i,1);
   }
-  // lasers
   for (let i=lasers.length-1;i>=0;i--){
     const L = lasers[i];
     L.timer += dt;
@@ -311,14 +321,38 @@ function updateBullets(dt){
     else if (L.phase === 'fire' && L.timer >= L.fire){ L.phase = 'cool'; L.timer = 0; }
     else if (L.phase === 'cool' && L.timer >= 420){ lasers.splice(i,1); }
   }
-  // saws movement
   for (let i=saws.length-1;i>=0;i--){
     const s = saws[i];
     s.off += s.dir * s.speed * (dt/16.67);
     if (Math.abs(s.off) > s.range) s.dir *= -1;
-    // remove if completely off-screen far left or right
     const worldX = s.x0 + s.off;
     if (worldX < -120 || worldX > W + 120) saws.splice(i,1);
+  }
+  // bombs timing & explosions
+  for (let i=bombs.length-1;i>=0;i--){
+    const b = bombs[i];
+    b.timer += dt;
+    // blink phase while warning
+    if (b.state === 'warn'){
+      b.flashPhase += dt;
+      if (b.timer >= b.warnTimer){
+        b.state = 'fuse';
+        b.timer = 0;
+      }
+    } else if (b.state === 'fuse'){
+      b.timer += 0; // fuse progression uses timer
+      if (b.timer >= b.fuse){
+        // explode
+        b.exploded = true;
+        b.state = 'explode';
+        b.explodeTimer = 0;
+        spawnParticles(b.x, b.y, '#ffb97a', 30);
+      }
+    } else if (b.state === 'explode'){
+      b.explodeTimer += dt;
+      // explosion lasts ~420ms, during which AoE applies
+      if (b.explodeTimer >= 420) { bombs.splice(i,1); continue; }
+    }
   }
 }
 
@@ -332,7 +366,7 @@ function updateParticles(dt){
   }
 }
 
-//// Player update (much faster & snappier)
+// player movement (just a bit faster)
 function updatePlayer(dt){
   let ax = 0, ay = 0;
   if (keys['arrowleft'] || keys['a']) ax -= 1;
@@ -341,10 +375,8 @@ function updatePlayer(dt){
   if (keys['arrowdown'] || keys['s']) ay += 1;
   player.vx += ax * player.accel * (dt/16.67);
   player.vy += ay * player.accel * (dt/16.67);
-  // clamp speed magnitude
   const sp = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
   if (sp > player.vmax){ player.vx = player.vx/sp * player.vmax; player.vy = player.vy/sp * player.vmax; }
-  // friction
   player.vx *= Math.pow(player.friction, dt/16.67);
   player.vy *= Math.pow(player.friction, dt/16.67);
   player.x += player.vx * (dt/16.67);
@@ -353,18 +385,21 @@ function updatePlayer(dt){
   player.y = clamp(player.y, 16, H - 16 - player.h);
 }
 
-//// Collisions & lives handling
+// collisions & lives
 function handleHit(){
   lives = Math.max(0, lives - 1);
   invulTimer = 1600;
-  // clear nearby bullets to avoid instant re-hit
   const safeRadius = 90;
   for (let i=bullets.length-1;i>=0;i--){
     const b = bullets[i];
     if (dist(b.x, b.y, player.x + player.w/2, player.y + player.h/2) < safeRadius) bullets.splice(i,1);
   }
+  // destroy nearby bombs that haven't exploded? no — keep potential hazards but clear very close ones
+  for (let i=bombs.length-1;i>=0;i--){
+    const bb = bombs[i];
+    if (bb.state !== 'explode' && dist(bb.x, bb.y, player.x + player.w/2, player.y + player.h/2) < 40) bombs.splice(i,1);
+  }
   spawnParticles(player.x + player.w/2, player.y + player.h/2, '#ffe9d6', 28);
-  // respawn location near center-bottom
   player.x = W*0.5 + rand(-30,30);
   player.y = H*0.68 + rand(-18,18);
   player.vx = player.vy = 0;
@@ -391,7 +426,7 @@ function checkCollisions(dt){
       }
     }
   }
-  // saws (treat saw as circle)
+  // saws
   for (let i=0;i<saws.length;i++){
     const s = saws[i];
     const sx = s.x0 + s.off, sy = s.y;
@@ -400,22 +435,32 @@ function checkCollisions(dt){
       handleHit(); return;
     }
   }
+  // bombs explosions
+  for (let i=0;i<bombs.length;i++){
+    const b = bombs[i];
+    if (b.state === 'explode'){
+      const ex = b.x, ey = b.y, r = b.radius;
+      const cx = player.x + player.w/2, cy = player.y + player.h/2;
+      if (dist(ex,ey,cx,cy) <= r){
+        handleHit(); return;
+      }
+    }
+  }
 }
 
-//// Difficulty & scoring
+// difficulty & scoring
 function updateDifficultyAndScore(dt){
   timeAlive += dt;
   difficulty += TUNE.difficultyRamp * dt;
   score += dt * TUNE.scorePerMs * difficulty;
 }
 
-//// Main loop
+// main loop
 function loop(now){
   if (!running || paused) return;
   const dt = Math.min(40, now - last);
   last = now;
 
-  // occasional new spawners
   if (Math.random() < (TUNE.spawnRandomChance * (difficulty/1.08))) {
     const r = Math.random();
     if (r < 0.35) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
@@ -442,39 +487,31 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-//// Draw everything (bullets, lasers, saws, player)
+// draw
 function draw(){
   ctx.clearRect(0,0,W,H);
   // background
   const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#05060a'); g.addColorStop(1,'#08101a');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  // faint grid lines for robotic feel
+  // faint grid
   ctx.strokeStyle = 'rgba(255,255,255,0.02)';
   for (let x=0;x<W;x+=80){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
   for (let y=0;y<H;y+=80){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
-  // saws (draw first so bullets can overlap)
+  // saws
   for (const s of saws){
     const sx = s.x0 + s.off, sy = s.y, size = s.size;
-    // saw disc
     ctx.save(); ctx.translate(sx + size/2, sy + size/2);
     const rot = performance.now() / 100 * (s.dir > 0 ? 1 : -1);
     ctx.rotate(rot);
-    // steel disc
     ctx.fillStyle = '#bfc7cc'; circle(0,0, size*0.44);
-    // red teeth
     ctx.fillStyle = '#ff6b6b';
     for (let t=0;t<10;t++){
       const ang = t * (Math.PI*2/10);
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(ang)*(size*0.45), Math.sin(ang)*(size*0.45));
-      ctx.lineTo(Math.cos(ang+0.12)*(size*0.75), Math.sin(ang+0.12)*(size*0.75));
-      ctx.lineTo(Math.cos(ang-0.12)*(size*0.75), Math.sin(ang-0.12)*(size*0.75));
-      ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(Math.cos(ang)*(size*0.45), Math.sin(ang)*(size*0.45)); ctx.lineTo(Math.cos(ang+0.12)*(size*0.75), Math.sin(ang+0.12)*(size*0.75)); ctx.lineTo(Math.cos(ang-0.12)*(size*0.75), Math.sin(ang-0.12)*(size*0.75)); ctx.closePath(); ctx.fill();
     }
     ctx.restore();
-    // slight ground shadow
     ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(sx + 2, sy + size - 4, size - 4, 6);
   }
 
@@ -484,7 +521,7 @@ function draw(){
     ctx.strokeStyle = 'rgba(79,224,255,0.05)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(b.x, b.y, b.r*1.6, b.r*1.6, 0,0,Math.PI*2); ctx.stroke();
   }
 
-  // lasers (draw warnings then beams)
+  // lasers
   for (const L of lasers){
     if (L.phase === 'warn'){
       ctx.fillStyle = 'rgba(79,224,255,0.06)'; ctx.fillRect(L.x, L.y, L.w, L.h);
@@ -496,12 +533,36 @@ function draw(){
     }
   }
 
+  // bombs: draw warning, fuse, explosion
+  for (const b of bombs){
+    if (b.state === 'warn'){
+      // blinking indicator (circle) with small pulsing
+      const alpha = 0.18 + 0.12 * Math.sin(performance.now()/120);
+      ctx.fillStyle = `rgba(255,187,110,${alpha})`;
+      ctx.beginPath(); ctx.ellipse(b.x, b.y, 14 + Math.sin(b.flashPhase/80)*4, 14 + Math.sin(b.flashPhase/80)*4, 0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#2b2b2b'; circle(b.x, b.y, 9);
+      // small fuse or tick mark
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)'; ctx.beginPath(); ctx.moveTo(b.x-4, b.y-6); ctx.lineTo(b.x+4, b.y-6); ctx.stroke();
+    } else if (b.state === 'fuse'){
+      // small darker bomb with small fuse glow
+      ctx.fillStyle = '#2b2b2b'; circle(b.x, b.y, 10);
+      const tfrac = b.timer / b.fuse;
+      ctx.fillStyle = `rgba(255,150,60,${0.8 - tfrac*0.5})`; circle(b.x, b.y - 12, 3 + 6*tfrac);
+    } else if (b.state === 'explode'){
+      // explosion ring
+      const progress = clamp(b.explodeTimer / 420, 0, 1);
+      const r = b.radius * (0.6 + 0.9 * progress);
+      ctx.fillStyle = `rgba(255,160,80,${0.28 - 0.25*progress})`; ctx.beginPath(); ctx.ellipse(b.x, b.y, r, r, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = `rgba(255,200,140,${0.9 - 0.9*progress})`; circle(b.x, b.y, Math.max(6, 20*(1-progress)));
+    }
+  }
+
   // particles
   for (const p of particles){
     ctx.fillStyle = p.color; ctx.globalAlpha = clamp(p.life/500, 0, 1); ctx.beginPath(); ctx.ellipse(p.x, p.y, p.size, p.size, 0, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
   }
 
-  // player (robotic, fast)
+  // player (robotic)
   const px = player.x, py = player.y, pw = player.w, ph = player.h;
   const invulAlpha = invulTimer > 0 ? (Math.sin(performance.now()/80) > 0 ? 0.28 : 1.0) : 1.0;
   ctx.globalAlpha = invulAlpha;
@@ -518,9 +579,9 @@ function draw(){
 function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); ctx.fill(); }
 function circle(x,y,r){ ctx.beginPath(); ctx.ellipse(x,y,r,r,0,0,Math.PI*2); ctx.fill(); }
 
-//// Init & helpers
+// init/reset/start/end functions
 function resetWorld(){
-  bullets = []; lasers = []; saws = []; spawners = []; particles = [];
+  bullets = []; lasers = []; saws = []; bombs = []; spawners = []; particles = [];
   score = 0; timeAlive = 0; difficulty = 1.0;
   lives = 3; invulTimer = 0;
   player.x = W*0.5; player.y = H*0.72; player.vx = player.vy = 0;
@@ -563,7 +624,7 @@ function endRun(){
   updateMenuLB();
 }
 
-//// Main loop
+// main loop
 function loop(now){
   if (!running || paused) return;
   const dt = Math.min(40, now - last);
@@ -586,7 +647,6 @@ function loop(now){
   checkCollisions(dt);
   updateDifficultyAndScore(dt);
 
-  // UI
   timeChip.textContent = 'Time: ' + (timeAlive/1000).toFixed(2) + 's';
   multChip.textContent = 'Lives: ' + '♥'.repeat(lives);
   scoreVal.textContent = Math.round(score);
@@ -595,7 +655,7 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-// initialize
+// initial setup & show menu
 resetWorld();
 updateMenuLB();
 menu.style.display='flex'; tutorial.style.display='none'; pausePanel.style.display='none'; gameOverPanel.style.display='none';
