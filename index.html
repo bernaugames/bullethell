@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sweat Hell — Bullet Hell Dodge</title>
+<style>
+  :root{
+    --bg:#05050a; --accent:#ff3b6b; --accent2:#00e5ff; --muted:#9aa3b2;
+  }
+  html,body{height:100%;margin:0;background:var(--bg);font-family:Inter,system-ui,Segoe UI,Roboto,Arial;color:#e6eef6}
+  canvas{display:block; width:100vw; height:100vh; background:transparent}
+  #ui{position:absolute;inset:0;pointer-events:none}
+  .center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:auto}
+  .panel{background:rgba(255,255,255,0.03);border-radius:12px;padding:16px;border:1px solid rgba(255,255,255,0.04);box-shadow:0 12px 40px rgba(0,0,0,0.6);width:860px;max-width:94%}
+  h1{margin:0;font-size:30px}
+  .muted{color:var(--muted);font-size:13px}
+  .row{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  button.btn{pointer-events:auto;border:0;padding:10px 16px;border-radius:10px;background:linear-gradient(180deg,#111217,#151821);color:var(--accent2);font-weight:700;cursor:pointer}
+  button.btn.alt{background:linear-gradient(180deg,#17040a,#2b0712);color:var(--accent)}
+  #hud{position:absolute;left:12px;top:12px;pointer-events:none;display:flex;gap:10px}
+  .chip{background:rgba(255,255,255,0.02);padding:8px 10px;border-radius:10px;border:1px solid rgba(255,255,255,0.02);font-weight:800}
+  #scoreBig{position:absolute;left:50%;top:12px;transform:translateX(-50%);pointer-events:none;font-weight:900;font-size:20px;background:rgba(255,255,255,0.02);padding:8px 12px;border-radius:12px}
+  input[type=text]{padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:#fff}
+  #controls{position:absolute;bottom:12px;left:12px;pointer-events:none;background:rgba(255,255,255,0.02);padding:8px;border-radius:10px;color:var(--muted)}
+  .leaderboard { text-align:left; color:var(--muted); margin-top:8px; }
+  @media (max-width:720px){ .panel{padding:12px} h1{font-size:22px} }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="ui">
+  <div id="hud">
+    <div class="chip" id="timeChip">Time: 0.0s</div>
+    <div class="chip" id="multChip">Multiplier: x1</div>
+  </div>
+
+  <div id="scoreBig">SWEAT HELL • Score: <span id="scoreVal">0</span></div>
+
+  <!-- Menu -->
+  <div id="menu" class="center">
+    <div class="panel">
+      <h1>Sweat Hell</h1>
+      <p class="muted">A punishing bullet-hell dodge game. Move fast, react to patterns, watch laser warnings — survive as long as possible. One hit = death.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:12px">
+        <button id="startBtn" class="btn">Start (Space)</button>
+        <button id="tutorialBtn" class="btn">How to Play</button>
+        <button id="resetSave" class="btn alt">Reset Leaderboard</button>
+      </div>
+      <div class="row" style="margin-top:14px;justify-content:space-between;align-items:center">
+        <div style="text-align:center">
+          <div class="muted">High Score</div>
+          <div style="font-weight:900;font-size:18px" id="highScore">0</div>
+        </div>
+        <div style="width:18px"></div>
+        <div style="text-align:left">
+          <div class="muted">Local Leaderboard (Top 5)</div>
+          <div id="leaderboard" class="leaderboard">No entries yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tutorial -->
+  <div id="tutorial" class="center" style="display:none;pointer-events:auto">
+    <div class="panel">
+      <h1>How to Play</h1>
+      <p class="muted">Move with arrow keys or WASD. Survive waves of bullets and avoid telegraphed lasers. The game gets harder over time. Perfect for sweaty dodgers.</p>
+      <div class="row"><button id="tBack" class="btn">Back</button></div>
+    </div>
+  </div>
+
+  <!-- Pause -->
+  <div id="pause" class="center" style="display:none;pointer-events:auto">
+    <div class="panel">
+      <h1>Paused</h1>
+      <p class="muted">Press P to resume, R to restart.</p>
+      <div class="row"><button id="resumeBtn" class="btn">Resume (P)</button><button id="rBtn" class="btn alt">Restart (R)</button></div>
+    </div>
+  </div>
+
+  <!-- Game Over -->
+  <div id="gameOver" class="center" style="display:none;pointer-events:auto">
+    <div class="panel">
+      <h1>Run Over</h1>
+      <p class="muted">You lasted <span id="finalTime">0.0</span>s — Score: <strong id="finalScore">0</strong></p>
+      <div style="display:flex;gap:8px;justify-content:center;align-items:center">
+        <input id="playerName" type="text" placeholder="Name (max 12)" maxlength="12" />
+        <button id="saveBtn" class="btn">Save Score</button>
+      </div>
+      <div class="row" style="margin-top:12px"><button id="tryBtn" class="btn">Try Again</button><button id="menuBtn" class="btn alt">Main Menu</button></div>
+      <div style="margin-top:12px">
+        <div class="muted">Leaderboard</div>
+        <div id="gameOverLB" class="leaderboard"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="controls">Move: Arrows/WASD • P = Pause • R = Restart</div>
+</div>
+
+<script>
+/*
+Sweat Hell — Bullet Hell Dodger
+Single-file game:
+- Fullscreen canvas, black background
+- Player moves smoothly, one-hit death
+- Bullet patterns: spirals, radial bursts, homing bullets
+- Lasers with telegraph warnings
+- Difficulty ramps up over time (intentionally hard)
+- Local Top-5 leaderboard in localStorage
+- Pause (P), Restart (R), Start (Space or button)
+*/
+
+//// Canvas & resize
+const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
+let W = canvas.width = innerWidth, H = canvas.height = innerHeight;
+window.addEventListener('resize', ()=> { W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
+
+//// Utilities
+function rand(a,b){ return a + Math.random()*(b-a); }
+function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
+function dist(x1,y1,x2,y2){ const dx=x1-x2, dy=y1-y2; return Math.sqrt(dx*dx+dy*dy); }
+function circleRectColl(cx,cy,r,rx,ry,rw,rh){ // circle vs rect
+  const nearestX = Math.max(rx, Math.min(cx, rx+rw));
+  const nearestY = Math.max(ry, Math.min(cy, ry+rh));
+  const dx = cx - nearestX, dy = cy - nearestY;
+  return dx*dx + dy*dy <= r*r;
+}
+
+// DOM UI
+const menu = document.getElementById('menu'), tutorial = document.getElementById('tutorial'), pausePanel = document.getElementById('pause'), gameOverPanel = document.getElementById('gameOver');
+const startBtn = document.getElementById('startBtn'), tutorialBtn = document.getElementById('tutorialBtn'), tBack = document.getElementById('tBack');
+const resumeBtn = document.getElementById('resumeBtn'), rBtn = document.getElementById('rBtn');
+const tryBtn = document.getElementById('tryBtn'), menuBtn = document.getElementById('menuBtn');
+const saveBtn = document.getElementById('saveBtn'), playerName = document.getElementById('playerName');
+const timeChip = document.getElementById('timeChip'), multChip = document.getElementById('multChip');
+const scoreVal = document.getElementById('scoreVal'), highScoreEl = document.getElementById('highScore');
+const leaderboardEl = document.getElementById('leaderboard'), gameOverLB = document.getElementById('gameOverLB');
+const resetSaveBtn = document.getElementById('resetSave');
+
+startBtn.onclick = startGame;
+tutorialBtn.onclick = ()=>{ menu.style.display='none'; tutorial.style.display='flex'; }
+tBack.onclick = ()=>{ tutorial.style.display='none'; menu.style.display='flex'; }
+resumeBtn.onclick = togglePause;
+rBtn.onclick = restart;
+tryBtn.onclick = ()=>{ restart(); gameOverPanel.style.display='none'; }
+menuBtn.onclick = ()=>{ gameOverPanel.style.display='none'; menu.style.display='flex'; }
+saveBtn.onclick = ()=>{ const name = playerName.value.trim() || '---'; const list = addToLeaderboard(name, score); gameOverLB.innerHTML = formatLeaderboard(list); updateMenuLB(); saveBtn.disabled = true; }
+resetSaveBtn.onclick = ()=>{ if (confirm('Clear leaderboard & high score?')) { localStorage.removeItem('sweat_lb'); localStorage.removeItem('sweat_save'); loadSave(); updateMenuLB(); alert('Cleared'); } }
+
+document.addEventListener('keydown', (e)=> {
+  if ((e.key === ' ' || e.code === 'Space') && !running) startGame();
+  if (e.key === 'p') togglePause();
+  if (e.key === 'r') restart();
+});
+
+// leaderboard persistence
+function loadLB(){ try{const s=localStorage.getItem('sweat_lb'); return s?JSON.parse(s):[];}catch{return [];} }
+function saveLB(list){ localStorage.setItem('sweat_lb', JSON.stringify(list)); }
+function addToLeaderboard(name, score){
+  const lb = loadLB();
+  lb.push({name: name.slice(0,12), score: Math.round(score), date: new Date().toISOString()});
+  lb.sort((a,b)=>b.score-a.score);
+  const top = lb.slice(0,5);
+  saveLB(top);
+  return top;
+}
+function formatLeaderboard(list){
+  if (!list || list.length===0) return '<div style="opacity:0.8">No entries yet</div>';
+  let html = '<ol style="padding-left:16px;margin:6px 0">';
+  list.forEach(e => html += `<li style="margin-bottom:6px"><strong style="color:#fff">${e.name}</strong> — ${e.score}</li>`);
+  html += '</ol>';
+  return html;
+}
+
+// high score save
+function loadSave(){ try{const s=localStorage.getItem('sweat_save'); return s?JSON.parse(s):{high:0}; }catch{return {high:0}} }
+function saveSave(obj){ localStorage.setItem('sweat_save', JSON.stringify(obj)); }
+
+let saveState = loadSave();
+
+function updateMenuLB(){ leaderboardEl.innerHTML = formatLeaderboard(loadLB()); highScoreEl.textContent = Math.round(saveState.high || 0); }
+updateMenuLB();
+
+//// Game state
+let running = false, paused = false, last = performance.now();
+let score = 0, timeAlive = 0, difficulty = 1.0;
+let player = { x: 200, y: 200, w: 18, h: 24, vx:0, vy:0, speed: 0.34, accel:0.035, friction:0.92 };
+let keys = {};
+let bullets = [];   // {x,y,vx,vy,r,color,kind,life}
+let lasers = [];    // {x,y,w,h,warn,fire,phase,dir} phase: 'warn'|'fire'|'cool'
+let spawners = [];  // pattern controllers
+let particles = [];
+
+// Input handling for movement
+window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+//// Game tuning (hard/sweaty)
+const TUNE = {
+  spawnInterval: 900, // base ms before new pattern; will ramp down
+  spiralSpeed: 0.008,
+  spiralRate: 10,
+  homingChance: 0.12,
+  radialChance: 0.45,
+  laserChance: 0.12,
+  maxBulletsPerPattern: 48
+};
+
+// reset world for a fresh run
+function resetWorld(){
+  bullets = []; lasers = []; spawners = []; particles = [];
+  score = 0; timeAlive = 0; difficulty = 1.0;
+  player.x = W*0.5; player.y = H*0.75; player.vx = 0; player.vy = 0;
+  // initial spawner to start pressure quickly
+  addSpawner('spiral', W*0.5, H*0.25, {angle:0, speed: 0.002, rate:8});
+  addSpawner('radial', W*0.3, H*0.2, {count:10});
+}
+
+// main game start
+function startGame(){
+  resetWorld();
+  running = true; paused = false;
+  menu.style.display='none'; tutorial.style.display='none'; pausePanel.style.display='none'; gameOverPanel.style.display='none';
+  last = performance.now(); requestAnimationFrame(loop);
+}
+
+// restart
+function restart(){ resetWorld(); running = true; paused = false; menu.style.display='none'; gameOverPanel.style.display='none'; last = performance.now(); requestAnimationFrame(loop); }
+
+// pause toggle
+function togglePause(){ if (!running) return; paused = !paused; pausePanel.style.display = paused ? 'flex' : 'none'; if (!paused) { last = performance.now(); requestAnimationFrame(loop); } }
+
+// add patterns / spawners
+function addSpawner(type, x, y, opts){
+  spawners.push({ type, x, y, opts: opts||{}, timer: 0, interval: TUNE.spawnInterval });
+}
+
+// bullet creation
+function spawnBullet(x,y,vx,vy,r=6,color='#ff7b7b', kind='normal', life=15000){
+  bullets.push({ x,y,vx,vy,r,color,kind,life });
+}
+
+// homing bullet: will steer slowly towards player
+function spawnHoming(x,y,speed=2.2,r=6){
+  const angle = Math.atan2(player.y - y, player.x - x);
+  const vx = Math.cos(angle)*speed; const vy = Math.sin(angle)*speed;
+  spawnBullet(x,y,vx,vy,r,'#ffcc55','homing',8000);
+}
+
+// laser creation (telegraphed column or row)
+function spawnLaser(x,y,w,h,warn=700,fire=500){
+  lasers.push({x,y,w,h,warn,fire,phase:'warn',timer:0, color:'#ff3b6b'});
+}
+
+// particle
+function spawnParticles(x,y,color,count=8){
+  for (let i=0;i<count;i++){
+    particles.push({x,y,vx:rand(-2,2),vy:rand(-3,-0.5),life:400+Math.random()*300,size:2+Math.random()*3,color});
+  }
+}
+
+//// Spawner behavior implementation
+function updateSpawners(dt){
+  for (let i=spawners.length-1;i>=0;i--){
+    const s = spawners[i];
+    s.timer += dt;
+    // decrease interval as difficulty ramps (makes it sweatier)
+    const effectiveInterval = Math.max(120, s.interval * (1 - (difficulty-1)*0.12));
+    if (s.timer >= effectiveInterval){
+      s.timer = 0;
+      // choose behavior per type
+      if (s.type === 'spiral'){
+        // spawn a spiral / rotating stream
+        const count = Math.min(TUNE.maxBulletsPerPattern, 20 + Math.floor(difficulty*6));
+        let base = s.opts.angle || 0;
+        for (let i2=0;i2<count;i2++){
+          const a = base + (i2 * (Math.PI*2 / count)) + (Math.random()-0.5)*0.06;
+          const speed = 1.4 + difficulty*0.36 + Math.random()*0.6;
+          spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 5, '#ff9a9a', 'normal', 7000);
+        }
+        s.opts.angle = base + ((Math.random()<0.5?1:-1) * 0.18);
+      } else if (s.type === 'radial'){
+        const count = Math.min(32, 6 + Math.floor(6 * difficulty));
+        const jitter = 0.02;
+        for (let k=0;k<count;k++){
+          const a = (k/count)*Math.PI*2 + rand(-jitter, jitter);
+          const speed = 1.6 + difficulty*0.42;
+          spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 5, '#ff7676', 'normal', 7000);
+        }
+      } else if (s.type === 'shower'){
+        // stream of falling bullets from top
+        const count = 8 + Math.floor(difficulty*4);
+        for (let k=0;k<count;k++){
+          const sx = rand(40, W-40);
+          const sp = 2.2 + difficulty*0.5 + Math.random()*0.6;
+          spawnBullet(sx, -20, 0, sp, 6, '#ffd773', 'normal', 8000);
+        }
+      } else if (s.type === 'homing'){
+        const count = 1 + Math.floor(difficulty*1.1);
+        for (let k=0;k<count;k++) spawnHoming(s.x + rand(-8,8), s.y + rand(-8,8), 2.2 + difficulty*0.25 + Math.random()*0.3);
+      } else if (s.type === 'wall'){
+        // create a horizontal wall of bullets moving downward
+        const segments = 8 + Math.floor(difficulty*4);
+        for (let k=0;k<segments;k++){
+          const sx = 40 + k * ((W-80)/segments) + rand(-6,6);
+          spawnBullet(sx, s.y, 0, 1.8 + difficulty*0.25, 6, '#ffa86b', 'normal', 7000);
+        }
+      }
+      // also, occasionally spawn a laser (telegraphed) at spaced intervals
+      if (Math.random() < clamp(0.06 + difficulty*0.01, 0, 0.18)){
+        // pick vertical laser column (x) with warn then fire
+        const lx = rand(80, W-80);
+        spawnLaser(lx - 6, 40, 12, H-80, 700, 450);
+      }
+    }
+    // small chance to remove some old spawners for variation
+    if (Math.random() < 0.0005 * dt) { spawners.splice(i,1); }
+  }
+
+  // occasional new spawner creation to escalate chaos
+  if (Math.random() < 0.006 * (difficulty/1.2)) {
+    const choice = Math.random();
+    if (choice < 0.35) addSpawner('spiral', rand(80, W-80), rand(60, H*0.5), {});
+    else if (choice < 0.62) addSpawner('radial', rand(80, W-80), rand(60, H*0.5), {});
+    else if (choice < 0.82) addSpawner('shower', 0, -10, {});
+    else addSpawner('homing', rand(80, W-80), rand(20, H*0.4), {});
+  }
+}
+
+//// Bullets & lasers update
+function updateBullets(dt){
+  // bullets move, age, maybe home slightly
+  for (let i=bullets.length-1;i>=0;i--){
+    const b = bullets[i];
+    // homing gentle steer
+    if (b.kind === 'homing'){
+      const ang = Math.atan2(player.y - b.y, player.x - b.x);
+      const sp = Math.sqrt(b.vx*b.vx + b.vy*b.vy);
+      // lerp angle a bit
+      const cur = Math.atan2(b.vy, b.vx);
+      const na = cur + ( (ang - cur) * 0.03 );
+      b.vx = Math.cos(na)*sp; b.vy = Math.sin(na)*sp;
+    }
+    b.x += b.vx * (dt/16.67);
+    b.y += b.vy * (dt/16.67);
+    b.life -= dt;
+    // remove if off-screen or dead
+    if (b.life <= 0 || b.x < -60 || b.x > W+60 || b.y < -120 || b.y > H+120) bullets.splice(i,1);
+  }
+  // lasers
+  for (let i=lasers.length-1;i>=0;i--){
+    const L = lasers[i];
+    L.timer += dt;
+    if (L.phase === 'warn' && L.timer >= L.warn){ L.phase = 'fire'; L.timer = 0; spawnParticles(L.x + L.w/2, 60, '#ff3b6b', 18); }
+    else if (L.phase === 'fire' && L.timer >= L.fire){ L.phase = 'cool'; L.timer = 0; }
+    else if (L.phase === 'cool' && L.timer >= 400){ lasers.splice(i,1); }
+  }
+}
+
+//// Particles update
+function updateParticles(dt){
+  for (let i=particles.length-1;i>=0;i--){
+    const p = particles[i];
+    p.life -= dt;
+    p.x += p.vx * (dt/16.67);
+    p.y += p.vy * (dt/16.67);
+    p.vy += 0.06 * (dt/16.67);
+    if (p.life <= 0) particles.splice(i,1);
+  }
+}
+
+//// Player update (smooth movement)
+function updatePlayer(dt){
+  // input axes
+  let ax = 0, ay = 0;
+  if (keys['arrowleft'] || keys['a']) ax -= 1;
+  if (keys['arrowright'] || keys['d']) ax += 1;
+  if (keys['arrowup'] || keys['w']) ay -= 1;
+  if (keys['arrowdown'] || keys['s']) ay += 1;
+  // accelerate toward direction
+  player.vx += ax * player.accel * (dt/16.67);
+  player.vy += ay * player.accel * (dt/16.67);
+  // clamp speed vector magnitude
+  const vmax = 6.0; // feel fast
+  const sp = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
+  if (sp > vmax){ player.vx = player.vx/sp * vmax; player.vy = player.vy/sp * vmax; }
+  // friction (so movement is smooth but doesn't stop immediately)
+  player.vx *= Math.pow(player.friction, dt/16.67);
+  player.vy *= Math.pow(player.friction, dt/16.67);
+  player.x += player.vx * (dt/16.67);
+  player.y += player.vy * (dt/16.67);
+  // clamp to bounds
+  player.x = clamp(player.x, 24, W-24-player.w);
+  player.y = clamp(player.y, 24, H-24-player.h);
+}
+
+//// Collision detection and scoring
+function checkCollisions(dt){
+  // bullets -> player
+  for (let i=0;i<bullets.length;i++){
+    const b = bullets[i];
+    if (circleRectColl(b.x, b.y, b.r+1, player.x, player.y, player.w, player.h)){
+      // hit
+      spawnParticles(player.x + player.w/2, player.y + player.h/2, '#ff6b6b', 30);
+      endRun();
+      return;
+    }
+  }
+  // lasers
+  for (let i=0;i<lasers.length;i++){
+    const L = lasers[i];
+    if (L.phase === 'fire'){
+      // L defines column or row: we'll draw vertical column spanning h
+      const rx = L.x, ry = L.y, rw = L.w, rh = L.h;
+      if (rectIntersect(player.x, player.y, player.w, player.h, rx, ry, rw, rh)){
+        spawnParticles(player.x + player.w/2, player.y + player.h/2, '#ff3b6b', 30);
+        endRun(); return;
+      }
+    }
+  }
+  // score increases with time (slow)
+  score += dt * 0.012 * difficulty; // tuned to be slower than previous
+}
+
+function rectIntersect(ax,ay,aw,ah,bx,by,bw,bh){
+  return !(ax + aw < bx || ax > bx + bw || ay + ah < by || ay > by + bh);
+}
+
+//// Game end / UI actions
+function endRun(){
+  running = false;
+  // save high score if beat
+  if (score > (saveState.high || 0)){ saveState.high = Math.round(score); saveSave(saveState); }
+  // show gameOver panel and populate stats
+  document.getElementById('finalScore').textContent = Math.round(score);
+  document.getElementById('finalTime').textContent = (timeAlive/1000).toFixed(2);
+  gameOverLB.innerHTML = formatLeaderboard(loadLB());
+  gameOverPanel.style.display = 'flex';
+  saveBtn.disabled = false;
+  updateMenuLB();
+}
+
+//// Main loop
+function loop(now){
+  if (!running || paused) return;
+  const dt = Math.min(40, now - last);
+  last = now;
+  // ramp difficulty gradually
+  timeAlive += dt;
+  difficulty = 1 + (timeAlive / 20000); // slowly increases over 20s -> +1
+  // global pressure: every few seconds, create spawner patterns
+  if (Math.random() < (0.002 + difficulty*0.0009)) {
+    // randomly add a base spawner
+    const r = Math.random();
+    if (r < 0.4) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.7) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.87) addSpawner('homing', rand(80, W-80), rand(60, H*0.45), {});
+    else addSpawner('shower', 0, -10, {});
+  }
+
+  updateSpawners(dt);
+  updateBullets(dt);
+  updateParticles(dt);
+  updatePlayer(dt);
+  checkCollisions(dt);
+
+  // scoring and UI
+  timeChip.textContent = 'Time: ' + (timeAlive/1000).toFixed(2) + 's';
+  multChip.textContent = 'Multiplier: x' + (1 + Math.floor((difficulty-1)*2));
+  scoreVal.textContent = Math.round(score);
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+//// Draw everything
+function draw(){
+  // clear + background
+  ctx.clearRect(0,0,W,H);
+  // star gradient / subtle grid
+  ctx.fillStyle = '#05050a'; ctx.fillRect(0,0,W,H);
+  // faint grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.015)'; ctx.lineWidth = 1;
+  for (let x=0;x<W;x+=80){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y=0;y<H;y+=80){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // draw bullets (world)
+  for (const b of bullets){
+    ctx.beginPath();
+    ctx.fillStyle = b.color;
+    ctx.ellipse(b.x, b.y, b.r, b.r, 0, 0, Math.PI*2);
+    ctx.fill();
+    // small glow
+    ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(b.x - b.r*0.3, b.y - b.r*0.6, b.r*0.6, b.r*0.5);
+  }
+
+  // lasers
+  for (const L of lasers){
+    if (L.phase === 'warn'){
+      // telegraph: pulsating thin bar
+      ctx.fillStyle = 'rgba(255,59,107,0.12)';
+      ctx.fillRect(L.x, L.y, L.w, L.h);
+      // flashing border
+      const a = 0.12 + 0.08 * Math.sin(performance.now()/120);
+      ctx.strokeStyle = `rgba(255,59,107,${a})`; ctx.lineWidth = 3;
+      ctx.strokeRect(L.x+1, L.y+1, L.w-2, L.h-2);
+    } else if (L.phase === 'fire'){
+      // bright beam
+      ctx.fillStyle = 'rgba(255,59,107,0.95)';
+      ctx.fillRect(L.x, L.y, L.w, L.h);
+      // softer glow
+      ctx.fillStyle = 'rgba(255,59,107,0.18)'; ctx.fillRect(L.x - 12, L.y, L.w + 24, L.h);
+    }
+  }
+
+  // particles
+  for (const p of particles){
+    ctx.fillStyle = p.color; ctx.globalAlpha = clamp(p.life/600, 0, 1);
+    ctx.beginPath(); ctx.ellipse(p.x, p.y, p.size, p.size, 0, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
+  }
+
+  // player (edgy rectangle)
+  ctx.save();
+  // glow
+  ctx.fillStyle = '#0b0f14'; roundRect(player.x - 4, player.y - 4, player.w + 8, player.h + 8, 6);
+  // main
+  ctx.fillStyle = '#00e5ff'; roundRect(player.x, player.y, player.w, player.h, 6);
+  // eyes
+  ctx.fillStyle = '#ff3b6b'; ctx.beginPath(); ctx.ellipse(player.x + player.w*0.28, player.y + player.h*0.36, 3.5, 5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(player.x + player.w*0.72, player.y + player.h*0.36, 3.5, 5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  // HUD is DOM-driven
+  // debug: show number of bullets
+  // ctx.fillStyle = '#fff'; ctx.fillText('Bullets: ' + bullets.length, 10, 20);
+}
+
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); ctx.fill(); }
+
+//// Initial spawner to start action (pre-game warmup)
+addSpawner('spiral', W*0.5, H*0.28, {angle:0});
+addSpawner('radial', W*0.28, H*0.18, {});
+addSpawner('shower', 0, -10, {});
+
+//// Small loop to occasionally create homing bullets to keep it stressful
+setInterval(()=> {
+  if (!running) return;
+  if (Math.random() < 0.28) {
+    // homing from top third
+    addSpawner('homing', rand(80, W-80), rand(20, H*0.35), {});
+  }
+}, 1400);
+
+// Update loop when not running (to keep UI responsive)
+function idleDraw(){ draw(); requestAnimationFrame(idleDraw); }
+requestAnimationFrame(idleDraw);
+
+//// Leaderboard helper functions on start
+function updateMenuLB(){ leaderboardEl.innerHTML = formatLeaderboard(loadLB()); highScoreEl.textContent = Math.round(saveState.high || 0); }
+updateMenuLB();
+
+</script>
+</body>
+</html>
