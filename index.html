@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Bullet Hell</title>
+<title>Sweat Hell — Robotic v3 (Lasers & Saws, Faster)</title>
 <style>
   :root{
     --bg:#05060a; --panel:#0b0d10; --muted:#98a2ad; --steel:#9aa6b2; --accent:#4fe0ff;
@@ -41,8 +41,8 @@
   <!-- Menu -->
   <div id="menu" class="center">
     <div class="panel">
-      <h1>Sweat Hell — Robotic v2</h1>
-      <p class="muted">Robotic grey style. Faster movement. Slower score. You have 3 lives. Survive as long as possible.</p>
+      <h1>Sweat Hell — Robotic v3</h1>
+      <p class="muted">Added lasers & moving saws. Faster movement. 3 lives. Telegraphed lasers and balanced saw placement for fairness.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:12px">
         <button id="startBtn" class="btn">Start (Space)</button>
         <button id="tutorialBtn" class="btn">How to Play</button>
@@ -66,7 +66,7 @@
   <div id="tutorial" class="center" style="display:none;pointer-events:auto">
     <div class="panel">
       <h1>How to Play</h1>
-      <p class="muted">Move with arrow keys or WASD. Survive waves of mechanical bullets and telegraphed lasers. You start with 3 lives — each hit costs a life. After a hit you briefly become invulnerable and respawn near center.</p>
+      <p class="muted">Move with arrow keys or WASD. Avoid bullets, moving saws and telegraphed lasers. You have 3 lives; each hit costs a life and grants brief invulnerability.</p>
       <div class="row"><button id="tBack" class="btn">Back</button></div>
     </div>
   </div>
@@ -101,26 +101,26 @@
 </div>
 
 <script>
-/* Sweat Hell — Robotic v2
-   - Grey/robotic visuals
-   - Faster & snappier player movement
-   - Score slower
-   - 3 lives system with brief invulnerability and respawn
-   - Local top-5 leaderboard
+/*
+Sweat Hell v3
+- Adds lasers (telegraphed) and moving saw obstacles.
+- Faster player (more responsive, higher top speed).
+- Keeps 3 lives + invulnerability after hit.
+- Local top-5 leaderboard persists.
 */
 
-//// Canvas
+//// Canvas & basic utilities
 const canvas = document.getElementById('game'), ctx = canvas.getContext('2d');
 let W = canvas.width = innerWidth, H = canvas.height = innerHeight;
 window.addEventListener('resize', ()=> { W = canvas.width = innerWidth; H = canvas.height = innerHeight; });
 
-//// Utilities
 function rand(a,b){ return a + Math.random()*(b-a); }
 function clamp(v,a,b){ return Math.max(a,Math.min(b,v)); }
 function dist(x1,y1,x2,y2){ const dx=x1-x2, dy=y1-y2; return Math.sqrt(dx*dx+dy*dy); }
 function circleRectColl(cx,cy,r,rx,ry,rw,rh){ const nx = Math.max(rx, Math.min(cx, rx+rw)); const ny = Math.max(ry, Math.min(cy, ry+rh)); const dx = cx - nx, dy = cy - ny; return dx*dx + dy*dy <= r*r; }
+function rectIntersect(ax,ay,aw,ah,bx,by,bw,bh){ return !(ax + aw < bx || ax > bx + bw || ay + ah < by || ay > by + bh); }
 
-//// DOM
+//// DOM refs
 const menu = document.getElementById('menu'), tutorial = document.getElementById('tutorial'), pausePanel = document.getElementById('pause'), gameOverPanel = document.getElementById('gameOver');
 const startBtn = document.getElementById('startBtn'), tutorialBtn = document.getElementById('tutorialBtn'), tBack = document.getElementById('tBack');
 const resumeBtn = document.getElementById('resumeBtn'), rBtn = document.getElementById('rBtn');
@@ -139,7 +139,7 @@ rBtn.onclick = restart;
 tryBtn.onclick = ()=>{ restart(); gameOverPanel.style.display='none'; }
 menuBtn.onclick = ()=>{ gameOverPanel.style.display='none'; menu.style.display='flex'; }
 saveBtn.onclick = ()=>{ const name = playerNameInput.value.trim() || '---'; const list = addToLeaderboard(name, score); gameOverLB.innerHTML = formatLeaderboard(list); updateMenuLB(); saveBtn.disabled = true; }
-resetSaveBtn.onclick = ()=>{ if (confirm('Clear leaderboard & high score?')) { localStorage.removeItem('sweat_lb_v2'); localStorage.removeItem('sweat_save_v2'); loadSave(); updateMenuLB(); alert('Cleared'); } }
+resetSaveBtn.onclick = ()=>{ if (confirm('Clear leaderboard & high score?')) { localStorage.removeItem('sweat_lb_v3'); localStorage.removeItem('sweat_save_v3'); loadSave(); updateMenuLB(); alert('Cleared'); } }
 
 document.addEventListener('keydown', (e)=> {
   if ((e.key === ' ' || e.code === 'Space') && !running) startGame();
@@ -148,8 +148,8 @@ document.addEventListener('keydown', (e)=> {
 });
 
 //// Leaderboard persistence
-const LB_KEY = 'sweat_lb_v2';
-const SAVE_KEY = 'sweat_save_v2';
+const LB_KEY = 'sweat_lb_v3';
+const SAVE_KEY = 'sweat_save_v3';
 function loadLB(){ try{const s=localStorage.getItem(LB_KEY); return s?JSON.parse(s):[];}catch{return [];} }
 function saveLB(list){ localStorage.setItem(LB_KEY, JSON.stringify(list)); }
 function addToLeaderboard(name, scr){
@@ -170,7 +170,6 @@ function formatLeaderboard(list){
 function loadSave(){ try{const s=localStorage.getItem(SAVE_KEY); return s?JSON.parse(s):{high:0}; }catch{return {high:0}} }
 function saveSave(obj){ localStorage.setItem(SAVE_KEY, JSON.stringify(obj)); }
 let saveState = loadSave();
-
 function updateMenuLB(){ leaderboardEl.innerHTML = formatLeaderboard(loadLB()); highScoreEl.textContent = Math.round(saveState.high || 0); }
 updateMenuLB();
 
@@ -178,26 +177,27 @@ updateMenuLB();
 let running=false, paused=false, last = performance.now();
 let score = 0, timeAlive = 0, difficulty = 1.0;
 let lives = 3;
-let invulTimer = 0; // ms invulnerability after being hit
-let player = { x: W/2, y: H*0.75, w: 20, h: 28, vx:0, vy:0, accel:0.22, friction:0.87, vmax:10 };
+let invulTimer = 0; // ms invulnerability after hit
+let player = { x: W/2, y: H*0.75, w: 18, h: 22, vx:0, vy:0, accel:0.42, friction:0.82, vmax:14.0 }; // FASTER: accel & vmax increased
 let keys = {};
-let bullets = [], lasers = [], spawners = [], particles = [];
+let bullets = [], lasers = [], saws = [], spawners = [], particles = [];
 
-//// Tuning (adjusted for fairness)
+//// Tuning
 const TUNE = {
-  spawnIntervalBase: 1200, // ms (patterns spawn less often)
-  spawnRandomChance: 0.002, // global random spawner chance per frame (reduced)
-  spiralSpeedFactor: 0.002,
-  difficultyRamp: 0.00006, // slower ramp
-  scorePerMs: 0.0035 // reduced — score increases much slower
+  spawnIntervalBase: 1200,
+  spawnRandomChance: 0.0022,
+  difficultyRamp: 0.00005,
+  scorePerMs: 0.0025, // slower score growth
+  sawSpawnChanceWhenSpawner: 0.16, // chance a spawner will create a saw instead of bullets (balanced)
+  sawDensityLimit: 4 // max saws on screen at once
 };
 
 //// Input movement
 window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
 
-//// Reset / spawn util
-function spawnBullet(x,y,vx,vy,r=6,color='#7f8a93', kind='normal', life=9000){
+//// Spawn helper functions
+function spawnBullet(x,y,vx,vy,r=6,color='#9aa6b2', kind='normal', life=9000){
   bullets.push({ x,y,vx,vy,r,color,kind,life });
 }
 function spawnHoming(x,y,speed=2.2,r=6){
@@ -207,15 +207,19 @@ function spawnHoming(x,y,speed=2.2,r=6){
 function spawnLaser(x,y,w,h,warn=700,fire=450){
   lasers.push({ x,y,w,h,warn,fire,phase:'warn',timer:0, color:'#4fe0ff' });
 }
-function spawnParticles(x,y,color,count=10){
-  for (let i=0;i<count;i++) particles.push({ x, y, vx:rand(-2.0,2.0), vy:rand(-3.0,-0.5), life:300 + Math.random()*240, size:2 + Math.random()*3, color});
+function spawnSaw(x,y,range=80,speed=1.2,size=36){
+  // limit saw density to avoid impossible screens
+  if (saws.length >= TUNE.sawDensityLimit) return;
+  saws.push({ x0:x, y:y, range:range, speed:speed, dir: (Math.random()<0.5?1:-1), off:0, size:size });
 }
-
+function spawnParticles(x,y,color,count=8){
+  for (let i=0;i<count;i++) particles.push({ x, y, vx:rand(-2.2,2.2), vy:rand(-3.2,-0.6), life:300 + Math.random()*260, size:2 + Math.random()*3, color});
+}
 function addSpawner(type,x,y,opts){
   spawners.push({ type, x, y, opts: opts||{}, timer:0, interval: TUNE.spawnIntervalBase + rand(0,700) });
 }
 
-//// Generation: fewer/less aggressive patterns
+//// Spawner behavior (sometimes create saws)
 function updateSpawners(dt){
   for (let i=spawners.length-1;i>=0;i--){
     const s = spawners[i];
@@ -223,60 +227,67 @@ function updateSpawners(dt){
     const effInterval = Math.max(240, s.interval * (1 - (difficulty-1)*0.06));
     if (s.timer >= effInterval){
       s.timer = 0;
-      if (s.type === 'spiral'){
-        const count = Math.min(28, 10 + Math.floor(difficulty*4));
-        let base = s.opts.angle || 0;
-        for (let k=0;k<count;k++){
-          const a = base + (k * (Math.PI*2 / count)) + rand(-0.03, 0.03);
-          const speed = 1.0 + difficulty*0.26 + Math.random()*0.4;
-          spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 4 + Math.random()*2, '#9aa6b2','normal',7000);
+      // occasionally spawn a saw instead of a bullet pattern
+      if (Math.random() < TUNE.sawSpawnChanceWhenSpawner){
+        // place saw on a guessed "platform" area (upper half) to give room to dodge
+        const sy = Math.max(120, Math.min(H-160, s.y + rand(-30, 40)));
+        spawnSaw(s.x + rand(-60,60), sy, 50 + Math.random()*90, 0.9 + Math.random()*0.8, 32 + Math.random()*8);
+      } else {
+        // bullet patterns similar to previous builds but slightly tamer
+        if (s.type === 'spiral'){
+          const count = Math.min(30, 10 + Math.floor(difficulty*4));
+          let base = s.opts.angle || 0;
+          for (let k=0;k<count;k++){
+            const a = base + (k * (Math.PI*2 / count)) + rand(-0.03, 0.03);
+            const speed = 1.0 + difficulty*0.26 + Math.random()*0.4;
+            spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 4 + Math.random()*2, '#9aa6b2','normal',7000);
+          }
+          s.opts.angle = base + ((Math.random()<0.5?1:-1) * 0.14);
+        } else if (s.type === 'radial'){
+          const count = Math.min(28, 6 + Math.floor(5 * difficulty));
+          for (let k=0;k<count;k++){
+            const a = (k/count)*Math.PI*2 + rand(-0.02, 0.02);
+            const speed = 1.4 + difficulty*0.36;
+            spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 5, '#8f99a0','normal',7000);
+          }
+        } else if (s.type === 'shower'){
+          const count = 6 + Math.floor(difficulty*3);
+          for (let k=0;k<count;k++){
+            const sx = rand(40, W-40);
+            const sp = 1.6 + difficulty*0.4 + Math.random()*0.4;
+            spawnBullet(sx, -20, 0, sp, 6, '#aab2b6','normal',8000);
+          }
+        } else if (s.type === 'homing'){
+          const count = 1 + Math.floor(difficulty*0.8);
+          for (let k=0;k<count;k++) spawnHoming(s.x + rand(-8,8), s.y + rand(-8,8), 2.0 + difficulty*0.18 + Math.random()*0.2);
+        } else if (s.type === 'wall'){
+          const segments = 6 + Math.floor(difficulty*3);
+          for (let k=0;k<segments;k++){
+            const sx = 40 + k * ((W-80)/segments) + rand(-6,6);
+            spawnBullet(sx, s.y, 0, 1.6 + difficulty*0.2, 6, '#b7bcc0','normal',7000);
+          }
         }
-        s.opts.angle = base + ((Math.random()<0.5?1:-1) * 0.14);
-      } else if (s.type === 'radial'){
-        const count = Math.min(28, 6 + Math.floor(5 * difficulty));
-        for (let k=0;k<count;k++){
-          const a = (k/count)*Math.PI*2 + rand(-0.02, 0.02);
-          const speed = 1.4 + difficulty*0.36;
-          spawnBullet(s.x, s.y, Math.cos(a)*speed, Math.sin(a)*speed, 5, '#8f99a0','normal',7000);
+        // small chance to spawn a vertical laser at some spawns (telegraphed)
+        if (Math.random() < clamp(0.04 + difficulty*0.008, 0, 0.12)) {
+          const lx = rand(80, W-80);
+          spawnLaser(lx - 6, 40, 12, H-80, 700, 450);
         }
-      } else if (s.type === 'shower'){
-        const count = 6 + Math.floor(difficulty*3);
-        for (let k=0;k<count;k++){
-          const sx = rand(40, W-40);
-          const sp = 1.6 + difficulty*0.4 + Math.random()*0.4;
-          spawnBullet(sx, -20, 0, sp, 6, '#aab2b6','normal',8000);
-        }
-      } else if (s.type === 'homing'){
-        const count = 1 + Math.floor(difficulty*0.8);
-        for (let k=0;k<count;k++) spawnHoming(s.x + rand(-8,8), s.y + rand(-8,8), 2.0 + difficulty*0.18 + Math.random()*0.2);
-      } else if (s.type === 'wall'){
-        const segments = 6 + Math.floor(difficulty*3);
-        for (let k=0;k<segments;k++){
-          const sx = 40 + k * ((W-80)/segments) + rand(-6,6);
-          spawnBullet(sx, s.y, 0, 1.6 + difficulty*0.2, 6, '#b7bcc0','normal',7000);
-        }
-      }
-
-      // occasionally spawn a laser but less often
-      if (Math.random() < clamp(0.04 + difficulty*0.008, 0, 0.12)){
-        const lx = rand(80, W-80);
-        spawnLaser(lx - 6, 40, 12, H-80, 800, 400);
       }
     }
     if (Math.random() < 0.0003 * dt) spawners.splice(i,1);
   }
 
-  // chance to create new spawner - lower than before to give breathing room
-  if (Math.random() < TUNE.spawnRandomChance * (difficulty/1.2)) {
+  // occasional new spawner
+  if (Math.random() < (TUNE.spawnRandomChance * (difficulty/1.2))) {
     const r = Math.random();
-    if (r < 0.28) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
-    else if (r < 0.58) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
-    else if (r < 0.78) addSpawner('shower', 0, -10, {});
-    else addSpawner('homing', rand(80, W-80), rand(60, H*0.45), {});
+    if (r < 0.35) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.63) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.82) addSpawner('shower', 0, -10, {});
+    else addSpawner('homing', rand(80, W-80), rand(20, H*0.4), {});
   }
 }
 
-//// Bullets & lasers update
+//// Update bullets, lasers, saws, particles
 function updateBullets(dt){
   for (let i=bullets.length-1;i>=0;i--){
     const b = bullets[i];
@@ -292,17 +303,25 @@ function updateBullets(dt){
     b.life -= dt;
     if (b.life <= 0 || b.x < -60 || b.x > W+60 || b.y < -120 || b.y > H+120) bullets.splice(i,1);
   }
-
+  // lasers
   for (let i=lasers.length-1;i>=0;i--){
     const L = lasers[i];
     L.timer += dt;
-    if (L.phase === 'warn' && L.timer >= L.warn) { L.phase = 'fire'; L.timer = 0; spawnParticles(L.x + L.w/2, 60, '#4fe0ff', 14); }
-    else if (L.phase === 'fire' && L.timer >= L.fire) { L.phase = 'cool'; L.timer = 0; }
-    else if (L.phase === 'cool' && L.timer >= 420) { lasers.splice(i,1); }
+    if (L.phase === 'warn' && L.timer >= L.warn){ L.phase = 'fire'; L.timer = 0; spawnParticles(L.x + L.w/2, 60, '#4fe0ff', 14); }
+    else if (L.phase === 'fire' && L.timer >= L.fire){ L.phase = 'cool'; L.timer = 0; }
+    else if (L.phase === 'cool' && L.timer >= 420){ lasers.splice(i,1); }
+  }
+  // saws movement
+  for (let i=saws.length-1;i>=0;i--){
+    const s = saws[i];
+    s.off += s.dir * s.speed * (dt/16.67);
+    if (Math.abs(s.off) > s.range) s.dir *= -1;
+    // remove if completely off-screen far left or right
+    const worldX = s.x0 + s.off;
+    if (worldX < -120 || worldX > W + 120) saws.splice(i,1);
   }
 }
 
-//// Particles update
 function updateParticles(dt){
   for (let i=particles.length-1;i>=0;i--){
     const p = particles[i];
@@ -313,7 +332,7 @@ function updateParticles(dt){
   }
 }
 
-//// Player update (faster & snappier)
+//// Player update (much faster & snappier)
 function updatePlayer(dt){
   let ax = 0, ay = 0;
   if (keys['arrowleft'] || keys['a']) ax -= 1;
@@ -322,7 +341,7 @@ function updatePlayer(dt){
   if (keys['arrowdown'] || keys['s']) ay += 1;
   player.vx += ax * player.accel * (dt/16.67);
   player.vy += ay * player.accel * (dt/16.67);
-  // clamp speed
+  // clamp speed magnitude
   const sp = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
   if (sp > player.vmax){ player.vx = player.vx/sp * player.vmax; player.vy = player.vy/sp * player.vmax; }
   // friction
@@ -330,28 +349,26 @@ function updatePlayer(dt){
   player.vy *= Math.pow(player.friction, dt/16.67);
   player.x += player.vx * (dt/16.67);
   player.y += player.vy * (dt/16.67);
-  // clamp to bounds
   player.x = clamp(player.x, 16, W - 16 - player.w);
   player.y = clamp(player.y, 16, H - 16 - player.h);
 }
 
-//// Collision & lives handling
+//// Collisions & lives handling
 function handleHit(){
-  // reduce one life, clear bullets near player, make invulnerable
   lives = Math.max(0, lives - 1);
-  invulTimer = 1600; // 1.6s invulnerability
-  // remove bullets within a radius to avoid instant double-hit
-  const safeRadius = 80;
+  invulTimer = 1600;
+  // clear nearby bullets to avoid instant re-hit
+  const safeRadius = 90;
   for (let i=bullets.length-1;i>=0;i--){
     const b = bullets[i];
     if (dist(b.x, b.y, player.x + player.w/2, player.y + player.h/2) < safeRadius) bullets.splice(i,1);
   }
   spawnParticles(player.x + player.w/2, player.y + player.h/2, '#ffe9d6', 28);
-  // respawn near center
-  player.x = W * 0.5 + rand(-30,30);
-  player.y = H * 0.6 + rand(-20,20);
+  // respawn location near center-bottom
+  player.x = W*0.5 + rand(-30,30);
+  player.y = H*0.68 + rand(-18,18);
   player.vx = player.vy = 0;
-  if (lives <= 0){ endRun(); }
+  if (lives <= 0) endRun();
 }
 
 function checkCollisions(dt){
@@ -369,77 +386,105 @@ function checkCollisions(dt){
   for (let i=0;i<lasers.length;i++){
     const L = lasers[i];
     if (L.phase === 'fire'){
-      const rx = L.x, ry = L.y, rw = L.w, rh = L.h;
-      if (rectIntersect(player.x, player.y, player.w, player.h, rx, ry, rw, rh)){
-        handleHit();
-        return;
+      if (rectIntersect(player.x, player.y, player.w, player.h, L.x, L.y, L.w, L.h)){
+        handleHit(); return;
       }
+    }
+  }
+  // saws (treat saw as circle)
+  for (let i=0;i<saws.length;i++){
+    const s = saws[i];
+    const sx = s.x0 + s.off, sy = s.y;
+    const r = s.size*0.45;
+    if (circleRectColl(sx + s.size/2, sy + s.size/2, r + 1, player.x, player.y, player.w, player.h)){
+      handleHit(); return;
     }
   }
 }
 
-function rectIntersect(ax,ay,aw,ah,bx,by,bw,bh){ return !(ax + aw < bx || ax > bx + bw || ay + ah < by || ay > by + bh); }
-
-//// Scoring & difficulty
+//// Difficulty & scoring
 function updateDifficultyAndScore(dt){
   timeAlive += dt;
-  difficulty += TUNE.difficultyRamp * dt; // slow ramp
-  score += dt * TUNE.scorePerMs * difficulty; // slow score growth
+  difficulty += TUNE.difficultyRamp * dt;
+  score += dt * TUNE.scorePerMs * difficulty;
 }
 
-//// Spawner & world maintenance trigger
+//// Main loop
 function loop(now){
   if (!running || paused) return;
   const dt = Math.min(40, now - last);
   last = now;
-  // occasionally add spawners (rate lowered)
-  if (Math.random() < (TUNE.spawnRandomChance * (difficulty/1.1))) {
+
+  // occasional new spawners
+  if (Math.random() < (TUNE.spawnRandomChance * (difficulty/1.08))) {
     const r = Math.random();
-    if (r < 0.28) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
-    else if (r < 0.58) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
-    else if (r < 0.78) addSpawner('shower', 0, -10, {});
-    else addSpawner('homing', rand(80, W-80), rand(60, H*0.45), {});
+    if (r < 0.35) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.63) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.82) addSpawner('shower', 0, -10, {});
+    else addSpawner('homing', rand(80, W-80), rand(20, H*0.4), {});
   }
 
   updateSpawners(dt);
   updateBullets(dt);
   updateParticles(dt);
   updatePlayer(dt);
-  // reduce invulnerability timer
+
   if (invulTimer > 0){ invulTimer -= dt; if (invulTimer < 0) invulTimer = 0; }
   checkCollisions(dt);
   updateDifficultyAndScore(dt);
 
-  // UI updates
+  // UI
   timeChip.textContent = 'Time: ' + (timeAlive/1000).toFixed(2) + 's';
-  multChip.textContent = 'Lives: ' + '♥'.repeat(lives) + (lives===0 ? ' ' : '');
+  multChip.textContent = 'Lives: ' + '♥'.repeat(lives);
   scoreVal.textContent = Math.round(score);
 
   draw();
   requestAnimationFrame(loop);
 }
 
-//// Draw
+//// Draw everything (bullets, lasers, saws, player)
 function draw(){
   ctx.clearRect(0,0,W,H);
   // background
   const g = ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,'#05060a'); g.addColorStop(1,'#08101a');
   ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
 
-  // faint mechanical grid
+  // faint grid lines for robotic feel
   ctx.strokeStyle = 'rgba(255,255,255,0.02)';
   for (let x=0;x<W;x+=80){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
   for (let y=0;y<H;y+=80){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
 
-  // bullets
-  for (const b of bullets){
-    ctx.beginPath();
-    ctx.fillStyle = b.color; ctx.ellipse(b.x, b.y, b.r, b.r, 0, 0, Math.PI*2); ctx.fill();
-    // small mechanical glow ring
-    ctx.strokeStyle = 'rgba(79,224,255,0.06)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(b.x, b.y, b.r*1.8, b.r*1.8, 0, 0, Math.PI*2); ctx.stroke();
+  // saws (draw first so bullets can overlap)
+  for (const s of saws){
+    const sx = s.x0 + s.off, sy = s.y, size = s.size;
+    // saw disc
+    ctx.save(); ctx.translate(sx + size/2, sy + size/2);
+    const rot = performance.now() / 100 * (s.dir > 0 ? 1 : -1);
+    ctx.rotate(rot);
+    // steel disc
+    ctx.fillStyle = '#bfc7cc'; circle(0,0, size*0.44);
+    // red teeth
+    ctx.fillStyle = '#ff6b6b';
+    for (let t=0;t<10;t++){
+      const ang = t * (Math.PI*2/10);
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(ang)*(size*0.45), Math.sin(ang)*(size*0.45));
+      ctx.lineTo(Math.cos(ang+0.12)*(size*0.75), Math.sin(ang+0.12)*(size*0.75));
+      ctx.lineTo(Math.cos(ang-0.12)*(size*0.75), Math.sin(ang-0.12)*(size*0.75));
+      ctx.closePath(); ctx.fill();
+    }
+    ctx.restore();
+    // slight ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(sx + 2, sy + size - 4, size - 4, 6);
   }
 
-  // lasers
+  // bullets
+  for (const b of bullets){
+    ctx.beginPath(); ctx.fillStyle = b.color; ctx.ellipse(b.x, b.y, b.r, b.r, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = 'rgba(79,224,255,0.05)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(b.x, b.y, b.r*1.6, b.r*1.6, 0,0,Math.PI*2); ctx.stroke();
+  }
+
+  // lasers (draw warnings then beams)
   for (const L of lasers){
     if (L.phase === 'warn'){
       ctx.fillStyle = 'rgba(79,224,255,0.06)'; ctx.fillRect(L.x, L.y, L.w, L.h);
@@ -456,21 +501,15 @@ function draw(){
     ctx.fillStyle = p.color; ctx.globalAlpha = clamp(p.life/500, 0, 1); ctx.beginPath(); ctx.ellipse(p.x, p.y, p.size, p.size, 0, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1;
   }
 
-  // player (robotic)
+  // player (robotic, fast)
   const px = player.x, py = player.y, pw = player.w, ph = player.h;
-  // invul blinking
-  const invulAlpha = invulTimer > 0 ? (Math.sin(performance.now()/80) > 0 ? 0.35 : 1.0) : 1.0;
+  const invulAlpha = invulTimer > 0 ? (Math.sin(performance.now()/80) > 0 ? 0.28 : 1.0) : 1.0;
   ctx.globalAlpha = invulAlpha;
-  // shadow plate
   ctx.fillStyle = '#0b1014'; roundRect(px - 3, py - 3, pw + 6, ph + 6, 6);
-  // body (steel)
   ctx.fillStyle = '#9aa6b2'; roundRect(px, py, pw, ph, 6);
-  // panel lines
-  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; ctx.strokeRect(px + 2, py + 6, pw - 4, ph - 12);
-  // visor / eye
-  ctx.fillStyle = '#0e2f33'; roundRect(px + pw*0.18, py + ph*0.25, pw*0.64, ph*0.22, 4);
-  ctx.fillStyle = '#4fe0ff'; ctx.fillRect(px + pw*0.22, py + ph*0.28, pw*0.6, ph*0.12);
-  // antenna
+  ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 1; ctx.strokeRect(px+2, py+6, pw-4, ph-12);
+  ctx.fillStyle = '#0e2f33'; roundRect(px + pw*0.2, py + ph*0.25, pw*0.6, ph*0.22, 4);
+  ctx.fillStyle = '#4fe0ff'; ctx.fillRect(px + pw*0.22, py + ph*0.28, pw*0.58, ph*0.12);
   ctx.fillStyle = '#0b1014'; ctx.fillRect(px + pw*0.5 - 2, py - 8, 4, 8);
   ctx.fillStyle = '#4fe0ff'; circle(px + pw*0.5, py - 10, 3);
   ctx.globalAlpha = 1;
@@ -479,13 +518,12 @@ function draw(){
 function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); ctx.fill(); }
 function circle(x,y,r){ ctx.beginPath(); ctx.ellipse(x,y,r,r,0,0,Math.PI*2); ctx.fill(); }
 
-//// Initialization & helper spawners
+//// Init & helpers
 function resetWorld(){
-  bullets = []; lasers = []; spawners = []; particles = [];
+  bullets = []; lasers = []; saws = []; spawners = []; particles = [];
   score = 0; timeAlive = 0; difficulty = 1.0;
   lives = 3; invulTimer = 0;
-  player.x = W*0.5; player.y = H*0.7; player.vx = player.vy = 0;
-  // preload a couple spawners
+  player.x = W*0.5; player.y = H*0.72; player.vx = player.vy = 0;
   addSpawner('spiral', W*0.5, H*0.25, {angle:0});
   addSpawner('radial', W*0.28, H*0.2, {});
   addSpawner('shower', 0, -10, {});
@@ -525,18 +563,18 @@ function endRun(){
   updateMenuLB();
 }
 
-//// Game main loop
+//// Main loop
 function loop(now){
   if (!running || paused) return;
   const dt = Math.min(40, now - last);
   last = now;
-  // occasional spawner creation (reduced chance)
-  if (Math.random() < (TUNE.spawnRandomChance * (difficulty/1.1))) {
+
+  if (Math.random() < (TUNE.spawnRandomChance * (difficulty/1.08))) {
     const r = Math.random();
-    if (r < 0.28) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
-    else if (r < 0.58) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
-    else if (r < 0.78) addSpawner('shower', 0, -10, {});
-    else addSpawner('homing', rand(80, W-80), rand(60, H*0.45), {});
+    if (r < 0.35) addSpawner('spiral', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.63) addSpawner('radial', rand(80, W-80), rand(60, H*0.45), {});
+    else if (r < 0.82) addSpawner('shower', 0, -10, {});
+    else addSpawner('homing', rand(80, W-80), rand(20, H*0.4), {});
   }
 
   updateSpawners(dt);
@@ -544,9 +582,7 @@ function loop(now){
   updateParticles(dt);
   updatePlayer(dt);
 
-  // invulnerability countdown
-  if (invulTimer > 0) { invulTimer -= dt; if (invulTimer < 0) invulTimer = 0; }
-
+  if (invulTimer > 0){ invulTimer -= dt; if (invulTimer < 0) invulTimer = 0; }
   checkCollisions(dt);
   updateDifficultyAndScore(dt);
 
@@ -559,7 +595,7 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-//// Init
+// initialize
 resetWorld();
 updateMenuLB();
 menu.style.display='flex'; tutorial.style.display='none'; pausePanel.style.display='none'; gameOverPanel.style.display='none';
